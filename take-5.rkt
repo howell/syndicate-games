@@ -121,6 +121,9 @@
 ;; the in-hand assertion goes away (maybe it should stay around. then the player
 ;; keeps track of what card they play, and we add a new invariant that a player
 ;; doesn't play a card multiple times).
+;;
+;; 5) No Impersonation
+;; Player actors only make assertions with their own PlayerId
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The Dealer
