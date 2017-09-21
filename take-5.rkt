@@ -1,7 +1,8 @@
 #lang syndicate/actor
 
 (require racket/list)
-(require (only-in racket/set list->set set->list))
+(require racket/set)
+(require (only-in racket/string string-join))
 (require (only-in racket/random random-ref random-sample))
 (require (only-in racket/sequence sequence-length))
 
@@ -124,80 +125,96 @@
 ;;
 ;; 5) No Impersonation
 ;; Player actors only make assertions with their own PlayerId
+;;
+;; 6) Timeliness
+;; Players play a card in each round
+;; (round n) ==> (eventually (plays pid n c))
+;; for all players
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The Dealer
 
-;; for N players could do:
-#|
-(field [moves '()])
-(for ([pid player-ids])
-  (react (on (asserted (plays pid (current-round) $c))
-             (moves (cons (plays pid (current-round) c) (moves)))
-             (stop (current-facet-id)
-                   (when (= (sequence-length player-ids) (length moves))
-                     ;; have all the moves, play some cards!
-                     #f)))))
-|#
-
-;; Deck -> Dealer
-(define (spawn-dealer deck)
-  (let*-values ([(p1-start-hand deck) (draw 10 deck)]
-                [(p2-start-hand deck) (draw 10 deck)]
+;; Deck (Setof PlayerId) -> Dealer
+(define (spawn-dealer deck all-player-ids)
+  (define num-players (set-count all-player-ids))
+  (unless (and (>= num-players 2) (<= num-players 10))
+    (error "Take-5 is played with 2-10 players"))
+  (define initial-scores
+    (for/hash ([pid (in-set all-player-ids)]) (values pid 0)))
+  (let*-values ([(initial-hands deck) (deal all-player-ids deck)]
                 [(r1-start deck) (draw-one deck)]
                 [(r2-start deck) (draw-one deck)]
                 [(r3-start deck) (draw-one deck)]
                 ;; not a typo
-                [(r4-start decky) (draw-one deck)])
+                [(r4-start deck) (draw-one deck)])
     (spawn
      #:name 'dealer
-     (field (deck decky)
-            (scores (hash
-                     player-1 0
-                     player-2 0))
-            (p1-hand p1-start-hand)
-            (p2-hand p2-start-hand)
+     (field (scores initial-scores)
+            (hands initial-hands)
             (rows (list (row (list r1-start))
                         (row (list r2-start))
                         (row (list r3-start))
                         (row (list r4-start)))))
      (log-rows (rows))
-     ;; -> Card
-     (define (draw-card!)
-       (define-values (c d) (draw-one (deck)))
-       (deck d)
-       c)
-     (assert (in-hand player-1 (p1-hand)))
-     (assert (in-hand player-2 (p2-hand)))
      (for ([r (in-list (rows))])
        (assert r))
+     ;; possibly need begin/dataflow?
+     (for ([(pid hand) (in-hash (hands))])
+       (assert (in-hand pid hand)))
      (field (current-round 1))
      (assert (round (current-round)))
-     (on (asserted (plays player-1 (current-round) $p1-c))
-         (unless (member p1-c (p1-hand))
-           (error (format "~v tried to play card ~v not in their hand: ~v" player-1 p1-c (p1-hand))))
-         (react
-          (on (asserted (plays player-2 (current-round) $p2-c))
-              (unless (member p2-c (p2-hand))
-                (error (format "~v tried to play card ~v not in their hand: ~v" player-2 p2-c (p2-hand))))
-              (define moves (list (plays player-1 (current-round) p1-c)
-                                  (plays player-2 (current-round) p2-c)))
-              ;; TODO: log in a separate actor
-              (log-move (first moves))
-              (log-move (second moves))
-              (define-values (new-rows new-scores)
-                (play-round (rows) moves (scores)))
-              (log-rows new-rows)
-              (rows new-rows)
-              (scores new-scores)
-              (p1-hand (remove p1-c (p1-hand)))
-              (p2-hand (remove p2-c (p2-hand)))
-              (unless (= (current-round) 10)
-                (current-round (add1 (current-round))))
-              (stop-current-facet)
-              #;(when (= (current-round) 11)
-                ;; hmmmmmmm not right
-                (stop-current-facet))))))))
+
+     (field [moves '()])
+     (for ([pid all-player-ids])
+       (on (asserted (plays pid (current-round) $c))
+           (define m (plays pid (current-round) c))
+           (log-move m)
+           (moves (cons m (moves)))
+           (hands (hash-update (hands) pid (lambda (hand) (remove c hand))))
+           (when (= num-players (length (moves)))
+             ;; have all the moves, play some cards!
+             (define-values (new-rows new-scores)
+               (play-round (rows) (moves) (scores)))
+             (log-rows new-rows)
+             (log-scores new-scores)
+             (rows new-rows)
+             (scores new-scores)
+             (cond
+               [(< (current-round) 10)
+                ;; start the next round
+                (moves '())
+                (current-round (add1 (current-round)))]
+               [else
+                ;; the game is over!
+                (define winner/s (lowest-score/s (scores)))
+                (log-winner/s winner/s)
+                (stop-current-facet)])))))))
+
+;; (Setof PlayerId) (Listof Card) -> (Values (Hashof PlayerId (Listof Card)) (Listof Card))
+;; Deal each player 10 cards, recording the association in a hash and giving
+;; back the deck with the dealt cards removed
+(define (deal all-player-ids deck)
+  (for/fold ([hands (hash)]
+             [deck deck])
+             ([pid (in-set all-player-ids)])
+    (define-values (hand decky) (draw 10 deck))
+    (values (hash-set hands pid hand) decky)))
+
+(module+ test
+  (let ()
+    (define-values (hands rest-of-deck)
+      (deal (set 'p1 'p2 'p3) the-deck))
+    ;; each player has a hand, nothing else in the hash
+    (check-equal? (hash-count hands) 3)
+    (check-true (hash-has-key? hands 'p1))
+    (check-true (hash-has-key? hands 'p2))
+    (check-true (hash-has-key? hands 'p3))
+    ;; each player has 10 cards
+    (check-equal? (length (hash-ref hands 'p1)) 10)
+    (check-equal? (length (hash-ref hands 'p2)) 10)
+    (check-equal? (length (hash-ref hands 'p3)) 10)
+    ;; 30 cards removed from the deck
+    (check-equal? (length rest-of-deck) (- (length the-deck) 30))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The Rules of the Game
@@ -370,12 +387,22 @@
 
 ;; Scores PlayerId Score -> Scores
 (define (add-bulls-to-score scores pid bulls)
-  (hash-update scores pid + bulls))
+  (hash-update scores pid (lambda (old-bulls) (+ old-bulls bulls))))
+
+;; Scores -> (NonemptyListof PlayerId)
+;; determine the winner(s) of a game, which is the player, or players in case of
+;; a tie.
+(define (lowest-score/s scores)
+  (define min-score
+    (apply min (hash-values scores)))
+  (for/list ([(pid score) (in-hash scores)]
+             #:when (= min-score score))
+    pid))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Player Agents, AI
 
-;; it seems like there's a race s.t. the player sees the start of a round
+;; it seems like there could be a race s.t. the player sees the start of a round
 ;; before their hand updates.
 
 ;; PlayerId GamePlayer -> PlayerAgent
@@ -411,12 +438,36 @@
   (log-take-5-debug "The current rows are:\n\t~v\n\t~v\n\t~v\n\t~v"
                     (first rows) (second rows) (third rows) (fourth rows)))
 
+;; PlayerId Card (Listof Card) -> Void
 (define (log-player-decision pid c hand)
   (log-take-5-debug "~a chooses card ~v from hand ~v" pid c hand))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Testing
+;; Scores -> Void
+(define (log-scores scores)
+  (log-take-5-debug "The current scores are:")
+  (for ([(pid score) (in-hash scores)])
+    (log-take-5-debug "~a has ~v bulls" pid score)))
 
-(spawn-dealer (shuffle the-deck))
-(spawn-player player-1 random-player)
-(spawn-player player-2 random-player)
+;; (Listof PlayerId) -> Void
+(define (log-winner/s pids)
+  (cond
+    [(= 1 (length pids))
+     (log-take-5-debug "~a wins!" (first pids))]
+    [else
+     (define names (map symbol->string pids))
+     (log-take-5-debug (string-join names ", "
+                                    #:before-last " and "
+                                    #:after-last " tie!"))]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Test Game
+
+(define players
+  (set 'tony-the-tiger
+       'tucan-sam
+       'tophat-jones
+       'eyehole-man))
+
+(spawn-dealer (shuffle the-deck) players)
+(for ([player (in-set players)])
+  (spawn-player player random-player))
