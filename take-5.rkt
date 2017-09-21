@@ -38,11 +38,11 @@
 ;; a InHand is (in-hand PlayerId Card)
 (struct in-hand (player card) #:transparent)
 
-;; a Round is a (round Nat) the Nat is between 1 and 10
-(struct round (number) #:transparent)
+;; a Round is a (round-has-begun Nat) the Nat is between 1 and 10
+(struct round-has-begun (number) #:transparent)
 
 ;; a Move is (plays PlayerId Nat Card)
-(struct plays (player round card) #:transparent)
+(struct played-in-round (player round card) #:transparent)
 
 ;; a GamePlayer is a function (Setof Card) Rows -> Card
 ;; that picks out a card to play based on a current state of the rows.
@@ -94,7 +94,7 @@
 
 ;; the dealer asserts (in-hand PlayerId (Listof Card)) for each player
 ;; the dealer asserts Rows representing the current state of the game
-;; the dealer asserts (round Nat) to start each round
+;; the dealer asserts (round-has-begun Nat) to start each round
 ;; to play a card during round n, each player asserts a Move with the current
 ;; round number
 
@@ -128,7 +128,7 @@
 ;;
 ;; 6) Timeliness
 ;; Players play a card in each round
-;; (round n) ==> (eventually (plays pid n c))
+;; (round-has-begun n) ==> (eventually (plays pid n c))
 ;; for all players
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -162,12 +162,12 @@
      (for ([(pid hand) (in-hash (hands))])
        (assert (in-hand pid hand)))
      (field (current-round 1))
-     (assert (round (current-round)))
+     (assert (round-has-begun (current-round)))
 
      (field [moves '()])
      (for ([pid all-player-ids])
-       (on (asserted (plays pid (current-round) $c))
-           (define m (plays pid (current-round) c))
+       (on (asserted (played-in-round pid (current-round) $c))
+           (define m (played-in-round pid (current-round) c))
            (log-move m)
            (moves (cons m (moves)))
            (hands (hash-update (hands) pid (lambda (hand) (remove c hand))))
@@ -224,11 +224,11 @@
   (define ordered-moves
     (sort moves
           <
-          #:key (compose card-rank plays-card)))
+          #:key (compose card-rank played-in-round-card)))
   (for/fold ([rows rows]
              [scores scores])
             ([m (in-list ordered-moves)])
-    (match-define (plays pid _ c ) m)
+    (match-define (played-in-round pid _ c ) m)
     ;; this is not very helpful for logging.
     (define-values (new-rows bulls) (play-card c rows))
     (values new-rows (add-bulls-to-score scores pid bulls))))
@@ -411,10 +411,10 @@
    #:name pid
    (define/query-value my-hand '() (in-hand pid $c) c)
    (define/query-set the-rows (row $r) (row r))
-   (on (asserted (round $n))
+   (on (asserted (round-has-begun $n))
        (let ([c (make-decision (my-hand) (set->list (the-rows)))])
          (log-player-decision pid c (my-hand))
-         (assert! (plays pid n c))))))
+         (assert! (played-in-round pid n c))))))
 
 ;; PlayerAgent
 ;; randomly pick a card in the hand
@@ -430,7 +430,7 @@
 
 ;; Move -> Void
 (define (log-move m)
-  (match-define (plays pid r c) m)
+  (match-define (played-in-round pid r c) m)
   (log-take-5-debug "player ~a plays card ~v in round ~v" pid c r))
 
 ;; Rows -> Void
