@@ -8,8 +8,6 @@
 
 (module+ test (require rackunit))
 
-;; let's assume that there are two players.
-
 ;; a Card is a (card Nat Nat) where the first Nat is the value/rank of the card
 ;; and the second Nat is the amount of "bulls"
 (struct card (rank bulls) #:transparent)
@@ -41,7 +39,7 @@
 ;; a Round is a (round-has-begun Nat) the Nat is between 1 and 10
 (struct round-has-begun (number) #:transparent)
 
-;; a Move is (plays PlayerId Nat Card)
+;; a Move is (played-in-round PlayerId Nat Card)
 (struct played-in-round (player round card) #:transparent)
 
 ;; a GamePlayer is a function (Setof Card) Rows -> Card
@@ -103,9 +101,9 @@
 ;; 1) No Takesies-Backsies: Once a player makes a move in a round, by asserting
 ;; (plays PlayerId Round Nat Card), that player never asserts a different card
 ;; for that round.
-;; (plays pid r c1) && (plays pid r c2) ==> c1 == c2
+;; (plays-in-round pid r c1) && (plays-in-round pid r c2) ==> c1 == c2
 ;; or maybe
-;; (plays pid r c1) ==> (always (plays pid r c2) ==> c1 == c2)
+;; (plays-in-round pid r c1) ==> (always (plays-in-round pid r c2) ==> c1 == c2)
 ;; ^ this doesn't say that the player has to maintain the move assertion. Or in
 ;; other words, is it ok for a player to retract a move once they've made it,
 ;; say when the next round begins? This protocol doesn't say.
@@ -114,7 +112,7 @@
 ;; Each player can only listen to (in-hand pid card) for their own pid
 ;;
 ;; 3) No Watching Other Players' Moves
-;; Players do not subscribe to (plays _ _ _)
+;; Players do not subscribe to (plays-in-round _ _ _)
 ;;
 ;; 4) Players Only Play Cards Actually In Their Hand
 ;; (plays pid r c) ==> (in-hand pid c)
@@ -128,8 +126,14 @@
 ;;
 ;; 6) Timeliness
 ;; Players play a card in each round
-;; (round-has-begun n) ==> (eventually (plays pid n c))
+;; (round-has-begun n) ==> (eventually (plays-in-round pid n c))
 ;; for all players
+;;
+;; 7) Patience
+;; The dealer waits for each player before starting the next round
+;; (round-has-begun n) ==>
+;;     (round-has-begun (n+1)) ==>
+;;         (forall pid. exists c. (plays-in-round pid n c)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The Dealer
