@@ -13,9 +13,6 @@
 (struct card (rank bulls) #:transparent)
 
 ;; a PlayerId is a Symbol
-;; for now, either 'player-1 or 'player-2
-(define player-1 'player-1)
-(define player-2 'player-2)
 
 ;; a Hand is a (Listof Card)
 
@@ -134,6 +131,11 @@
 ;; (round-has-begun n) ==>
 ;;     (round-has-begun (n+1)) ==>
 ;;         (forall pid. exists c. (plays-in-round pid n c)))
+;;
+;; 8) Orderly Succession
+;; The dealer starts round in the right order (0, 1, 2, 3, 4, ...)
+;; Does the number of the round matter? It's not being used for anything. Maybe
+;; it should just be "the dealer starts 10 different rounds"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The Dealer
