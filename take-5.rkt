@@ -93,6 +93,7 @@
   (define initial-scores (for/hash ([pid (in-set all-player-ids)]) (values pid 0)))
   
   (let*-values ([(initial-hands deck) (deal all-player-ids deck)]
+                ;; you really seem to need a draw-four 
                 [(r1-start deck) (draw-one deck)]
                 [(r2-start deck) (draw-one deck)]
                 [(r3-start deck) (draw-one deck)]
@@ -105,6 +106,7 @@
                               (row (list r3-start))
                               (row (list r4-start)))))
            (log-rows (rows))
+           
            (for ([r (in-list (rows))])
              (assert r))
            ;; possibly need begin/dataflow?
@@ -117,15 +119,18 @@
            (for ([pid all-player-ids])
              (on (asserted (played-in-round pid (current-round) $c))
                  (define m (played-in-round pid (current-round) c))
+                 
                  (log-move m)
+                 
                  (moves (cons m (moves)))
                  (hands (hash-update (hands) pid (lambda (hand) (remove c hand))))
                  (when (= num-players (length (moves)))
                    ;; have all the moves, play some cards!
-                   (define-values (new-rows new-scores)
-                     (play-round (rows) (moves) (scores)))
+                   (define-values (new-rows new-scores) (play-round (rows) (moves) (scores)))
+                   
                    (log-rows new-rows)
                    (log-scores new-scores)
+                   
                    (rows new-rows)
                    (scores new-scores)
                    (cond
