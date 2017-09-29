@@ -151,8 +151,7 @@
                 [(r1-start deck) (draw-one deck)]
                 [(r2-start deck) (draw-one deck)]
                 [(r3-start deck) (draw-one deck)]
-                ;; not a typo
-                [(r4-start deck) (draw-one deck)])
+                [(r4-start _) (draw-one deck)])
     (spawn
      #:name 'dealer
      (field (scores initial-scores)
