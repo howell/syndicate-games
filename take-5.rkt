@@ -235,13 +235,16 @@
             ([m (in-list ordered-moves)])
     (match-define (played-in-round pid _ c ) m)
     ;; this is not very helpful for logging.
-    (define-values (new-rows bulls) (play-card c rows))
+    (define-values (new-rows bulls row?) (play-card c rows))
+    (when row?
+      (log-row-pickup pid row?))
     (values new-rows (add-bulls-to-score scores pid bulls))))
 
-;; Card (Listof Row) -> (Values (Listof Row) Score)
+;; Card (Listof Row) -> (Values (Listof Row) Score (Optionof Row))
 ;; Add the card to the end of a row, or start a new row with the card, following
-;; the rules of the game. Returns the updated rows of the game as well as the
-;; number of bulls on the cards that the player picked up, if any.
+;; the rules of the game. Returns the updated rows of the game, the number of
+;; bulls on the cards that the player picked up (or 0 if they didn't pick any up),
+;; as well as the row of cards that the player picked up (or #f if they didn't).
 (define (play-card c rows)
   (define the-row (row-for-card c rows))
   (define other-rows (remove the-row rows))
@@ -253,15 +256,17 @@
        [(= (row-length the-row) 5)
         ;; player picks up row. The player's card is the beginning of a new row
         (values (cons (row (list c)) other-rows)
-                (row-bulls the-row))]
+                (row-bulls the-row)
+                the-row)]
        [else
         ;; add card to the end of the row
         (define next-row (add-card-to-row c the-row))
-        (values (cons next-row other-rows) 0)])]
+        (values (cons next-row other-rows) 0 #f)])]
     [else
      ;; player picks up row. The player's card is the beginning of a new row
      (values (cons (row (list c)) other-rows)
-             (row-bulls the-row))]))
+             (row-bulls the-row)
+             the-row)]))
 
 ;; Row Row Rows -> Rows
 (define (replace-row old-row new-row rows)
@@ -278,45 +283,51 @@
             (row (list (card 73 3) (card 82 1) (card 100 2)))))
     ;; 18 doesn't go at the end of the row, so give back the row with the lowest
     ;; number of bulls
-    (let-values ([(new-rows bulls) (play-card (card 18 1) rows)])
+    (let-values ([(new-rows bulls row?) (play-card (card 18 1) rows)])
       (check-equal? bulls (row-bulls (second rows)))
       (check-equal? (list->set new-rows)
                     (list->set (replace-row (second rows)
                                             (row (list (card 18 1)))
-                                            rows))))
+                                            rows)))
+      (check-equal? row? (second rows)))
     ;; 98 should go at the end of a row with 5 cards, resulting in the player
     ;; picking up the row and 98 being the start of a new row
-    (let-values ([(new-rows bulls) (play-card (card 98 1) rows)])
+    (let-values ([(new-rows bulls row?) (play-card (card 98 1) rows)])
       (check-equal? bulls (row-bulls (third rows)))
       (check-equal? (list->set new-rows)
                     (list->set (replace-row (third rows)
                                             (row (list (card 98 1)))
-                                            rows))))
+                                            rows)))
+      (check-equal? row? (third rows)))
     ;; the rest of these should pick out a row for the card to go at the end
-    (let-values ([(new-rows bulls) (play-card (card 32 1) rows)])
+    (let-values ([(new-rows bulls row?) (play-card (card 32 1) rows)])
       (check-equal? bulls 0)
       (check-equal? (list->set new-rows)
                     (list->set (replace-row (first rows)
                                             (add-card-to-row (card 32 1) (first rows))
-                                            rows))))
-    (let-values ([(new-rows bulls) (play-card (card 34 1) rows)])
+                                            rows)))
+      (check-false row?))
+    (let-values ([(new-rows bulls row?) (play-card (card 34 1) rows)])
       (check-equal? bulls 0)
       (check-equal? (list->set new-rows)
                     (list->set (replace-row (second rows)
                                             (add-card-to-row (card 34 1) (second rows))
-                                            rows))))
-    (let-values ([(new-rows bulls) (play-card (card 75 1) rows)])
+                                            rows)))
+      (check-false row?))
+    (let-values ([(new-rows bulls row?) (play-card (card 75 1) rows)])
       (check-equal? bulls 0)
       (check-equal? (list->set new-rows)
                     (list->set (replace-row (second rows)
                                             (add-card-to-row (card 75 1) (second rows))
-                                            rows))))
-    (let-values ([(new-rows bulls) (play-card (card 104 1) rows)])
+                                            rows)))
+      (check-false row?))
+    (let-values ([(new-rows bulls row?) (play-card (card 104 1) rows)])
       (check-equal? bulls 0)
       (check-equal? (list->set new-rows)
                     (list->set (replace-row (fourth rows)
                                             (add-card-to-row (card 104 1) (fourth rows))
-                                            rows))))))
+                                            rows)))
+      (check-false row?))))
 
 ;; Card (NonemptyListof Row) -> Row
 ;; determine which row a card belongs to
@@ -463,6 +474,11 @@
      (log-take-5-debug (string-join names ", "
                                     #:before-last " and "
                                     #:after-last " tie!"))]))
+
+
+;; PlayerId Row -> Void
+(define (log-row-pickup pid r)
+  (log-take-5-debug "~a picks up row ~v" pid r))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Test Game
